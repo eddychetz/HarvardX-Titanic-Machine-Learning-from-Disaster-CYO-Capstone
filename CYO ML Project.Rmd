@@ -252,7 +252,7 @@ acc <- confusionMatrix(y_hat_glm,test$survived, positive='Survived')
 #Generate table of accuracy
 accuracy_results <- tibble(method='Model 1: Logistic Regression Model', 
                            accuracy = acc$overall['Accuracy']) 
-accuracy_results%>%knitr::kable()
+accuracy_results%>%knitr::kable(caption = "Table 1. Accuracy of the 1st trained model")
 ```
 
 ### Model 2: Random Forest Model (`rf`)
@@ -296,7 +296,7 @@ acc
 accuracy_results <- accuracy_results %>%
    bind_rows(tibble(method='Model 2: Random Forest Model', 
                     accuracy = acc$overall['Accuracy']))
-accuracy_results %>% knitr::kable()
+accuracy_results %>% knitr::kable(caption = "Table 2. Accuracy of 2 trained models")
 ```
 ### Model 3: Gradient Boosting Model (`gbm`)
 
@@ -329,7 +329,7 @@ acc
 accuracy_results <- accuracy_results %>%
    bind_rows(tibble(method='Model 3: Gradient Boosting Model', 
                     accuracy = acc$overall['Accuracy']))
-accuracy_results %>% knitr::kable()
+accuracy_results %>% knitr::kable(caption = "Table 3. Accuracy of 3 trained models")
 ```
 
 ### Model 4: Support Vector Machine Model (`svm`)
@@ -360,7 +360,7 @@ acc
 accuracy_results <- accuracy_results %>%
    bind_rows(tibble(method='Model 4: Support Vector Machine Model', 
                     accuracy = acc$overall['Accuracy']))
-accuracy_results %>% knitr::kable()
+accuracy_results %>% knitr::kable(caption = "Table 4. Accuracy of 4 trained models")
 ```
 
 ### Model 5: Neural Network Model (`nnet`)
@@ -387,7 +387,7 @@ acc
 accuracy_results <- accuracy_results %>%
    bind_rows(tibble(method='Model 5: Neural Network Model', 
                     accuracy = acc$overall['Accuracy']))
-accuracy_results %>% knitr::kable()
+accuracy_results %>% knitr::kable(caption = "Table 5. Accuracy of all trained models")
 ```
 
 Neural Network model gives the best accuracy of `0.81356` on the `test` set, so we will consider it in predicting survivors in the `validation` set to be submitted on `Kaggle` site for evalution.
