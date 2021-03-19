@@ -1,0 +1,440 @@
+---
+title: 'CYO Machine Learning Project: Titanic - Machine Learning from Disaster'
+author: "Eddwin Cheteni"
+date: "`r format(Sys.Date())`"
+output: word_document
+---
+  
+---------------------------
+knitr::opts_chunk$set(echo = TRUE)
+--------------------------
+#########################################################
+# Load Libraries & set options
+#########################################################
+
+if (!require('tidyverse')) install.packages('tidyverse')
+if (!require('fastDummies')) install.packages('fastDummies')
+if (!require('caret')) install.packages('caret')
+if (!require('rpart')) install.packages('rpart')
+if (!require('randomForest')) install.packages('randomForest')
+if (!require('gbm')) install.packages("gbm")
+if (!require('nnet')) install.packages("nnet")
+
+options(digits=5)
+
+## Overview
+
+#` The data has been split into two groups:
+  
+#`  + training set (train.csv)
+#`  + test set (test.csv)
+
+#` The training set will be used to build machine learning models. For the training set, the outcomes are provided (also known as the `"ground truth"`) for each passenger. The model will be based on `"features"` like passengers' `gender` and `class`. The test set will be used to see how well our model performs on unseen data. For the test set, the `ground truth` is not provided for each passenger. The objective of this project is to predict these outcomes. For each passenger in the test set, we use the trained model to predict whether or not they survived the sinking of the Titanic.
+
+#` The datasets also include `gender_submission.csv`, a set of predictions that assume all and only female passengers survive, as an example of what a submission file should look like.
+
+## Loading data
+
+#loading train set
+train_set <- read_csv("~/Data Science Projects/train.csv")
+#converting the column names into lowercase
+names(train_set) <- tolower(names(train_set))
+
+#loading test set
+test_set <- read_csv("~/Data Science Projects/test.csv")
+#converting the column names into lowercase
+names(test_set) <- tolower(names(test_set))
+
+
+## Data Dictionary
+
+#checking the dimensions of the train set
+print("Dimensions of the train set are:")
+dim(train_set)
+#checking the dimension of the test set
+print("Dimensions of the test set are:")
+dim(test_set)
+
+#` This confirms that the train set has 891 rows and 12 columns while the test set has 418 rows and 11 columns.
+
+
+#checking the first few rows of the train set
+train_set %>% head()
+
+
+#checking the first few rows of the test set
+test_set %>% head()
+
+
+## Data Exploratory Analysis
+
+### Visualize train_set
+
+#` We need to explore on our data so as to get read of unnecessary features and some anomalies in the data such as missing values and outliers.
+
+
+train_set %>% str()
+
+
+#` Lets have a look at the summary of our train set:
+  
+
+train_set %>% summary()
+
+#` It indicates that `age` has `177` missing values. 
+
+#checking variables with missing values
+list_na <- colnames(train_set)[ apply(train_set, 2, anyNA) ]
+list_na
+
+
+#checking missing values by use of a barplot on embarked feature
+train_set%>%
+  select(embarked)%>% #select embarked column
+  ggplot()+
+  geom_bar(aes(embarked), stat = "count", na.rm=TRUE, position = "stack", fill =I("tomato3"))+
+  ggtitle("Bar plot for Embarked Feature") #title of the chart
+
+
+#` Based on the data source provided, there is `20%` missing values for `age`, `77%` for `cabin` and almost `0%` for `embarked`. From this observation, we can drop the `cabin` column, replace with median on the `age` column and mode in the `embarked` column.
+
+
+#since Southampton has the most passengers
+embarked_mode<-"S"
+#computing the median age
+age_median<-median(train_set$age,na.rm = TRUE)
+#replacing the missing values, age by median and embarked by the most frequent one i.e. Southampton
+train_set_replaced <- train_set %>%
+  mutate(age  = ifelse(is.na(age), age_median, age),embarked  = ifelse(is.na(embarked),embarked_mode, embarked))
+head(train_set_replaced)
+
+
+### Dropping unncessary columns
+
+#` The variable column `Cabin` is dropped since `77%` of the observations are missing therefore, including this in our model might compromise our model performance. 
+
+colnames(train_set_replaced)[apply(train_set_replaced, 2, anyNA)]
+
+
+# Data pre-processing on train set
+df<- train_set_replaced %>%
+  mutate(survived = as.factor(survived),#convert to a factor
+         pclass = as.factor(pclass),#convert to a factor
+         sex = as.factor(sex),#convert to a factor
+         embarked = as.factor(embarked),#convert to a factor
+         fare = log1p(fare),#log-transform fare variable
+         nbr_family = as.integer(sibsp + parch),#combine siblings and parents together
+         age = scale(age)) %>%#convert to an integer
+  select(survived, pclass, sex, age, nbr_family, fare, embarked)#selecting the required columns
+# Add cleaner factor levels
+levels(df$survived) <- c('Perished','Survived')
+levels(df$embarked) <- c('Cherbourg','Queenstown','Southampton')
+levels(df$sex) <- c('Female','Male')
+df%>%head()
+
+
+df%>%str()
+
+### Exploring the test set: 
+
+
+#checking missing values on test set
+colnames(test_set)[ apply(test_set, 2, anyNA) ]
+
+
+#computing the median age
+age_median<-median(test_set$age,na.rm = TRUE)
+#computing the median fare
+fare_median<-median(test_set$fare,na.rm = TRUE)
+#replacing the missing values in age and fare column so that validation can be performed
+test_set_replaced <- test_set %>%
+  mutate(age  = ifelse(is.na(age), age_median, age),fare  = ifelse(is.na(fare),fare_median, fare))
+head(test_set_replaced)
+
+
+
+#checking missing values on test set
+colnames(test_set_replaced)[ apply(test_set_replaced, 2, anyNA) ]
+
+#` Let us create the validation set from the test set:
+  
+
+# Data pre-processing on test set to create the validation set
+validation<- test_set_replaced %>%
+  mutate(pclass = as.factor(pclass),#convert to a factor
+         sex = as.factor(sex),#convert to a factor
+         embarked = as.factor(embarked),#convert to a factor
+         fare = log1p(fare),#log-transform variable fare
+         nbr_family = as.integer(sibsp + parch),#combine siblings and parents together
+         age = scale(age)) %>% #Normalize age
+  select(pclass, sex, age, nbr_family, fare, embarked)#selecting important features
+# Add cleaner factor levels
+levels(validation$embarked) <- c('Cherbourg','Queenstown','Southampton')
+levels(validation$sex) <- c('Female','Male')
+validation%>%head()
+
+
+#########################################################
+# Pre-Processing
+#########################################################
+
+#Create dummy variables on the categorical features in df set
+df <- dummy_cols(df, 
+                 select_columns=c('pclass','sex', 'embarked'), 
+                 remove_most_frequent_dummy = TRUE) %>%
+  select(-pclass,-sex,-embarked)
+#Create dummy variables on the categorical features in validation set
+validation <- dummy_cols(validation, 
+                         select_columns=c('pclass','sex', 'embarked'), 
+                         remove_most_frequent_dummy = TRUE) %>%
+  select(-pclass,-sex,-embarked)
+
+
+#` The tables below shows the datasets (`df` and `validation` set) ready for model training process after `dummies` were created in the above procedure.
+
+
+#Having a look at the df set
+df%>%head()%>%knitr::kable()
+
+
+#Have a look at the validation set
+validation%>%head()%>%knitr::kable()
+
+
+## Data partition
+
+#` We create this partition on the `df` set so that the `validation` set will be used for validation of the model.
+
+## Data partition
+
+#` We create this partition on the `train_Set` so that the test set will be used for validation of the model.
+
+
+# Partition df dataset
+set.seed(123)
+#creating index
+data_index <- createDataPartition(df$survived, p=0.8, list=FALSE)
+#splitting the data
+train <- df[data_index,]
+test <- df[-data_index,]
+#check the dimensions of the train and test set
+print("Dimensions of the train set are:")
+dim(train)
+#checking the dimension of the test set
+print("Dimensions of the test set are:")
+dim(test)
+
+## Model building
+
+### Model 1: Logistic Regression Model (`glm`)
+
+#############################################################
+# Model 1: Logistic Regression Model ('glm') all selected variables
+#############################################################
+
+# Fit model with all variables
+(fit_glm <- glm(survived ~ .,
+                data=train,
+                family=binomial))
+
+# Generate prediction
+p_hat_glm <- predict(fit_glm, test, type='response')
+y_hat_glm <- ifelse(p_hat_glm > 0.5, "Survived", "Perished") %>% factor()
+# Compute the accuracy
+acc <- confusionMatrix(y_hat_glm,test$survived, positive='Survived')
+#Generate table of accuracy
+accuracy_results <- tibble(method='Model 1: Logistic Regression Model', 
+                           accuracy = acc$overall['Accuracy']) 
+accuracy_results%>%knitr::kable()
+
+
+### Model 2: Random Forest Model (`rf`)
+
+
+#########################################################
+# Model 2: Random Forest Model ('rf')
+#########################################################
+
+set.seed(1234)
+
+# Set control parameters
+control <- trainControl(method='repeatedcv',
+                        number=10,
+                        repeats=5,
+                        search = 'random')
+
+# Determine baseline mtry
+mtry <- sqrt(ncol(train))
+tunegrid = expand.grid(.mtry=mtry)
+
+#Train RF model
+#Random generate 15 mtry values with tuneLength = 15
+train_rf <- train(survived ~ .,
+                  data=train,
+                  method='rf',
+                  tuneLength=15,
+                  trControl=control,
+                  importance=TRUE,
+                  localImp=TRUE)
+
+# Explain final RF model
+(fit_rf <- train_rf$finalModel)
+
+#Generate predictions
+y_hat_rf <- predict(fit_rf, test)
+#Compute the accuracy
+acc <- confusionMatrix(y_hat_rf,test$survived, positive='Survived')
+acc   
+#Generate table for results
+accuracy_results <- accuracy_results %>%
+  bind_rows(tibble(method='Model 2: Random Forest Model', 
+                   accuracy = acc$overall['Accuracy']))
+accuracy_results %>% knitr::kable()
+
+### Model 3: Gradient Boosting Model (`gbm`)
+
+
+#########################################################
+# Model 3: Gradient Boosting Model ('gbm')
+#########################################################
+
+set.seed(1234)
+
+# Set control parameters
+control <- trainControl(method='repeatedcv',
+                        number=4,
+                        repeats=4)
+
+#Train gbm model
+fit_gbm <- train(survived ~ .,
+                 data=train,
+                 method='gbm',
+                 trControl=control,
+                 verbose = FALSE)
+fit_gbm
+#Generate predictions
+y_hat_gbm <- predict(fit_gbm, test, type = "raw")
+
+#Compute the accuracy
+acc <- confusionMatrix(y_hat_gbm,test$survived, positive='Survived')
+acc   
+#Generate table for results
+accuracy_results <- accuracy_results %>%
+  bind_rows(tibble(method='Model 3: Gradient Boosting Model', 
+                   accuracy = acc$overall['Accuracy']))
+accuracy_results %>% knitr::kable()
+```
+
+### Model 4: Support Vector Machine Model (`svm`)
+
+
+#########################################################
+# Model 4: Support Vector Machine Model ('svm')
+#########################################################
+set.seed(1234)
+
+#setting control parameters
+cv_opts = trainControl(method="cv", number=10)
+
+#Train the model
+results_svm = train(survived~., 
+                    data=train, 
+                    method="svmLinear",
+                    preProcess="range", 
+                    trControl=cv_opts, 
+                    tuneLength=5)
+results_svm
+#Generate predictions
+y_hat_svm = predict(results_svm, test)
+#Compute the accuracy
+acc <- confusionMatrix(y_hat_svm, test$survived, positive='Survived')
+acc
+#Generate table for results
+accuracy_results <- accuracy_results %>%
+  bind_rows(tibble(method='Model 4: Support Vector Machine Model', 
+                   accuracy = acc$overall['Accuracy']))
+accuracy_results %>% knitr::kable()
+
+### Model 5: Neural Network Model (`nnet`)
+
+
+#########################################################
+# Model 5: Neural Network Model ('nnet')
+#########################################################
+results_nnet = train(survived~., 
+                     data=train, 
+                     method="avNNet",
+                     trControl=cv_opts, 
+                     preProcess="range",
+                     tuneLength=5, 
+                     trace=F, 
+                     maxit=1000)
+results_nnet
+#Generate predictions
+y_hat_nnet <- predict(results_nnet, test)
+#Compute the accuracy
+acc <- confusionMatrix(y_hat_nnet,test$survived, positive="Survived")
+acc
+#Generate table for results
+accuracy_results <- accuracy_results %>%
+  bind_rows(tibble(method='Model 5: Neural Network Model', 
+                   accuracy = acc$overall['Accuracy']))
+accuracy_results %>% knitr::kable()
+
+
+#` Neural Network model gives the best accuracy of `0.81356` on the `test` set, so we will consider it in predicting survivors in the `validation` set to be submitted on `Kaggle` site for evalution.
+
+
+### Final model - Neural network (`nnet`)
+
+
+
+########################################################
+# Final Model
+# Based on modeled results, apply Neural Network Model
+# to 'test set' and create submission csv
+########################################################
+#setting control parameters
+cv_opts = trainControl(method="cv", number=10)
+
+#Train nnet model
+fit_final <-  train(survived~., 
+                    data=train, 
+                    method="avNNet",
+                    trControl=cv_opts, 
+                    preProcess="range",
+                    tuneLength=5, 
+                    trace=F, 
+                    maxit=1000)
+fit_final
+#Generate predictions
+final_pred <- predict(fit_final, validation) 
+# Save the solution to a dataframe with two columns: PassengerId and Survived (prediction)
+gender_submission <- read_csv("~/Data Science Projects/gender_submission.csv")
+results <- data.frame(PassengerID = gender_submission$PassengerId)
+solution <- results %>% mutate(Survived = ifelse(final_pred=="Survived",1,0))
+# Write the solution to file
+write_csv(solution, path = '~/Data Science Projects/final_solution.csv', col_names = TRUE)
+
+
+## Final Model accuracy
+
+actual<-gender_submission%>%mutate(outcome = ifelse(gender_submission$Survived == '1', "Survived", "Perished"))
+predicted <- solution%>%mutate(outcome = ifelse(solution$Survived == '1', "Survived", "Perished"))
+#Compute the accuracy
+acc <- confusionMatrix(as.factor(predicted$outcome), as.factor(actual$outcome), positive="Survived")
+acc
+#Generate table for results
+final_accuracy <- acc$overall['Accuracy']
+final_accuracy
+
+
+# Conclusion
+
+#` Looking at the outcome obtained above, an accuracy of `0.84689` was obtained when computed on the predicted survivors in the provided `gender_submission` dataset against the predicted survivors using the `nnet` model.The final model results (`final_solution` file) were submitted on https://www.kaggle.com/submissions/20054628/20054628.raw for evaluation and scored an overall accuracy of `0.78468` on an unseen data, which sounds to be a good model. 
+
+# References
+
+#` 1. ***Titanic - Machine Learning from Disaster*** https://www.kaggle.com/c/titanic
+
+2. Clark, M. (2013), ***"An Introduction to Machine Learning with Application in R"***, Center for Social Research, University of Notre Dame.
